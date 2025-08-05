@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+    font-family: 'Inter', sans-serif;
+}
+
+.input-group {
+    position: relative;
+}
+
+.input-group .prefix {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    padding-left: 1rem;
+    display: flex;
+    align-items: center;
+    color: #9ca3af;
+}
+
+.input-group .suffix {
+    position: absolute;
+    right: 0;
+    top: 0;
+    height: 100%;
+    padding-right: 1rem;
+    display: flex;
+    align-items: center;
+    color: #9ca3af;
+}
+
+.input-group input {
+    padding-left: 2.5rem;
+}
+
+.input-group input.suffix-padding {
+    padding-right: 2.5rem;
+}
+
+.card {
+    background-color: white;
+    border-radius: 0.75rem;
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    padding: 1.5rem;
+}
+
+.rate-period {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
