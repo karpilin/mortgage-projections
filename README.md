@@ -8,7 +8,7 @@ The application is built with modern web technologies, including Vite for a fast
 
 ## **Features**
 
-* **Dynamic Interest Rates:** Define a schedule of interest rates for successive fixed periods of configurable length (2-year fixes by default).
+* **Dynamic Interest Rates:** Define a schedule of successive fixed periods, each with its own length in months, interest rate, and product fee. Fees are added to the loan at the start of their fix; the last line's terms carry forward, fee-free, until payoff.
 * **Fixed Monthly Payments:** Set a consistent monthly payment amount and see how it impacts the loan payoff time.
 * **10% Overpayment Cap:** The simulator accurately models a common mortgage feature where annual overpayments are capped at 10% of the remaining principal at the start of the year.
 * **Term vs Payment Reduction:** Choose whether overpayments shorten the mortgage term (the contractual payment level is kept at each rate change) or reduce the contractual payment (the original end date is kept).

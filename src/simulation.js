@@ -2,9 +2,12 @@
 //
 // Model: the lender sets a contractual monthly payment that stays fixed
 // within each fixed-rate period and is recalculated at every rate change.
-// Overpayments are measured against the contractual payment and capped at
-// 10% of the balance as it stood at the start of each year. What a rate-change
-// recalculation targets depends on the overpayment mode:
+// Periods are defined per-line ({months, rate, fee}); the fee is rolled into
+// the loan balance at the start of its period, and the last line's terms
+// carry forward fee-free until payoff. Overpayments are measured against the
+// contractual payment and capped at 10% of the balance as it stood at the
+// start of each year. What a rate-change recalculation targets depends on
+// the overpayment mode:
 //   - 'reduceTerm':    keep the payment level; overpayments shorten the loan.
 //   - 'reducePayment': keep the original end date; the payment drops instead.
 
@@ -53,60 +56,75 @@ export function standaloneLoanCost(amount, annualRate, termYears) {
  * @param {number} inputs.termYears
  * @param {number} inputs.paymentAmount - What the borrower actually pays each
  *   month (never less than the contractual payment).
- * @param {number[]} inputs.annualRates - Decimal rates (0.0464 = 4.64%), one
- *   per fixed period; the last one carries forward.
+ * @param {Array<{months: number, rate: number, fee: number}>} inputs.ratePeriods -
+ *   Successive fixed periods: duration in months, decimal annual rate
+ *   (0.0464 = 4.64%), and a product fee rolled into the balance at the start
+ *   of the period. The last period's months and rate repeat (fee-free) until
+ *   payoff.
  * @param {'reducePayment'|'reduceTerm'} [inputs.overpaymentMode]
- * @param {number} [inputs.fixYears] - Length of each fixed-rate period in years.
- * @param {{monthlyAmount: number, months: number}|null} [inputs.extraPayment] -
- *   Additional monthly payment applied only for the first `months` months
- *   (e.g. a redirected standalone-loan payment). Still subject to the cap.
  * @param {number|null} [inputs.fullRepaymentMonth] - Month after which the
  *   remaining balance is repaid as a lump sum (the end of a fixed period, so
  *   the 10% cap does not apply to it). Ignored if the loan clears earlier.
+ * @param {{monthlyAmount: number, months: number}|null} [inputs.extraPayment] -
+ *   Additional monthly payment applied only for the first `months` months
+ *   (e.g. a redirected standalone-loan payment). Still subject to the cap.
  * @returns {{months: number, totalInterest: number, totalOverpayments: number,
- *   initialContractualPayment: number, capHit: boolean,
+ *   totalFees: number, initialContractualPayment: number, capHit: boolean,
  *   paymentBelowContractual: boolean,
  *   fullRepayment: {month: number, amount: number}|null,
  *   schedule: Array<{month: number, interest: number, payment: number,
  *   contractual: number, balance: number}>}}
  */
-export function simulate({ principal, termYears, paymentAmount, annualRates, overpaymentMode = 'reducePayment', fullRepaymentMonth = null, fixYears = 2, extraPayment = null }) {
+export function simulate({ principal, termYears, paymentAmount, ratePeriods, overpaymentMode = 'reducePayment', fullRepaymentMonth = null, extraPayment = null }) {
     const totalMonths = termYears * 12;
-    const fixMonths = fixYears * 12;
 
     let balance = principal;
     let months = 0;
     let totalInterest = 0;
     let totalOverpayments = 0;
+    let totalFees = 0;
     let contractual = 0;
+    let currentRate = 0;
     let cap = 0;
     let overpaidThisYear = 0;
     let capHit = false;
     let paymentBelowContractual = false;
     let fullRepayment = null;
+    let initialContractualPayment = 0;
+    let periodIndex = -1;
+    let nextBoundary = 0;
     const schedule = [];
 
-    const initialContractualPayment = amortizingPayment(principal, annualRates[0] / 12, totalMonths);
-
     while (balance > 0 && months < totalMonths) {
-        const rateIndex = Math.min(Math.floor(months / fixMonths), annualRates.length - 1);
-        const monthlyRate = annualRates[rateIndex] / 12;
-
-        if (months === 0) {
-            contractual = initialContractualPayment;
-        } else if (months % fixMonths === 0) {
+        if (months === nextBoundary) {
+            periodIndex++;
+            const entered = periodIndex < ratePeriods.length ? ratePeriods[periodIndex] : null;
+            const period = entered ?? ratePeriods[ratePeriods.length - 1];
             const remainingMonths = totalMonths - months;
-            if (overpaymentMode === 'reducePayment') {
-                contractual = amortizingPayment(balance, monthlyRate, remainingMonths);
-            } else {
-                const previousRate = annualRates[Math.min(Math.floor((months - 1) / fixMonths), annualRates.length - 1)] / 12;
-                const implied = impliedRemainingTerm(balance, previousRate, contractual);
-                // The 1e-6 guards against float noise pushing ceil() up a whole month
-                const horizon = isFinite(implied)
-                    ? Math.min(remainingMonths, Math.max(1, Math.ceil(implied - 1e-6)))
-                    : remainingMonths;
-                contractual = amortizingPayment(balance, monthlyRate, horizon);
+            nextBoundary = months + period.months;
+
+            // reduceTerm: measure the horizon the outgoing arrangement
+            // implied, before the new fee lands on the balance
+            let horizon = remainingMonths;
+            if (months > 0 && overpaymentMode === 'reduceTerm') {
+                const implied = impliedRemainingTerm(balance, currentRate, contractual);
+                if (isFinite(implied)) {
+                    // The 1e-6 guards against float noise pushing ceil() up a whole month
+                    horizon = Math.min(remainingMonths, Math.max(1, Math.ceil(implied - 1e-6)));
+                }
             }
+
+            if (entered && entered.fee > 0) {
+                balance += entered.fee;
+                totalFees += entered.fee;
+            }
+            currentRate = period.rate / 12;
+            contractual = amortizingPayment(
+                balance,
+                currentRate,
+                months > 0 && overpaymentMode === 'reduceTerm' ? horizon : remainingMonths,
+            );
+            if (months === 0) initialContractualPayment = contractual;
         }
 
         if (months % 12 === 0) {
@@ -114,7 +132,7 @@ export function simulate({ principal, termYears, paymentAmount, annualRates, ove
             overpaidThisYear = 0;
         }
 
-        const interest = balance * monthlyRate;
+        const interest = balance * currentRate;
         const targetPayment = paymentAmount
             + (extraPayment && months < extraPayment.months ? extraPayment.monthlyAmount : 0);
         if (targetPayment < contractual) paymentBelowContractual = true;
@@ -150,6 +168,7 @@ export function simulate({ principal, termYears, paymentAmount, annualRates, ove
         months,
         totalInterest,
         totalOverpayments,
+        totalFees,
         initialContractualPayment,
         capHit,
         paymentBelowContractual,

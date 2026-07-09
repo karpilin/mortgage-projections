@@ -6,7 +6,6 @@ import { simulate, standaloneLoanCost } from './simulation.js';
 const principalInput = document.getElementById('principal');
 const termInput = document.getElementById('term');
 const paymentAmountInput = document.getElementById('paymentAmount');
-const fixYearsInput = document.getElementById('fixYears');
 const fullRepaymentSelect = document.getElementById('fullRepayment');
 const consolidationAmountInput = document.getElementById('consolidationAmount');
 const consolidationRateInput = document.getElementById('consolidationRate');
@@ -29,30 +28,57 @@ const gbp = value => value.toLocaleString('en-GB', { style: 'currency', currency
 const gbpWhole = value => value.toLocaleString('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 });
 const formatPayoff = months => `${Math.floor(months / 12)} years, ${months % 12} months`;
 
-function currentFixYears() {
-    const value = parseInt(fixYearsInput.value);
-    return isNaN(value) || value < 1 ? 2 : value;
+// Contractual payment in force during the loan's final fixed period
+// (constant within a period, so the last schedule row carries it)
+function finalPeriodContractual(result) {
+    return result.schedule[result.months - 1].contractual;
 }
 
-// Contractual payment in force during the loan's final fixed period
-function finalPeriodContractual(result, fixMonths) {
-    return result.schedule[Math.floor((result.months - 1) / fixMonths) * fixMonths].contractual;
+// Reads the per-line schedule: {months, rate (decimal), fee}.
+// Returns null if any line is incomplete or invalid.
+function readRatePeriods() {
+    const rows = Array.from(interestRatePeriodsDiv.children);
+    const periods = [];
+    for (const row of rows) {
+        const months = parseInt(row.querySelector('.months-input').value);
+        const rate = parseFloat(row.querySelector('.rate-input').value);
+        const feeRaw = row.querySelector('.fee-input').value;
+        const fee = feeRaw === '' ? 0 : parseFloat(feeRaw);
+        if (isNaN(months) || months < 1 || isNaN(rate) || isNaN(fee) || fee < 0) return null;
+        periods.push({ months, rate: rate / 100, fee });
+    }
+    return periods;
 }
 
 let repaymentOptionsKey = null;
 
-// Offer every fix boundary within the current term, keeping the
-// user's selection when it's still valid.
-function syncFullRepaymentOptions(termYears, fixYears) {
-    const key = `${termYears}:${fixYears}`;
+// Offer every fix boundary within the current term (entered periods, then
+// the last period's cadence carried forward), keeping the user's selection
+// when it's still valid.
+function syncFullRepaymentOptions(periods, termMonths) {
+    const boundaries = [];
+    let month = 0;
+    for (const period of periods) {
+        month += period.months;
+        if (month >= termMonths) break;
+        boundaries.push(month);
+    }
+    const lastMonths = periods[periods.length - 1].months;
+    if (month < termMonths) {
+        for (month += lastMonths; month < termMonths; month += lastMonths) {
+            boundaries.push(month);
+        }
+    }
+
+    const key = boundaries.join(',');
     if (repaymentOptionsKey === key) return;
     repaymentOptionsKey = key;
     const previous = fullRepaymentSelect.value;
     fullRepaymentSelect.innerHTML = '<option value="">No — run to payoff</option>';
-    for (let year = fixYears; year < termYears; year += fixYears) {
+    for (const boundary of boundaries) {
         const option = document.createElement('option');
-        option.value = String(year * 12);
-        option.textContent = `End of year ${year}`;
+        option.value = String(boundary);
+        option.textContent = `After ${formatPayoff(boundary)}`;
         fullRepaymentSelect.appendChild(option);
     }
     if (Array.from(fullRepaymentSelect.options).some(o => o.value === previous)) {
@@ -70,31 +96,31 @@ function runSimulation() {
     const principal = parseFloat(principalInput.value);
     const termYears = parseInt(termInput.value);
     const paymentAmount = parseFloat(paymentAmountInput.value) || 0;
-    const rateInputs = Array.from(document.querySelectorAll('.rate-input'));
-    const interestRates = rateInputs.map(input => parseFloat(input.value) / 100);
+    const ratePeriods = readRatePeriods();
     const overpaymentMode = document.querySelector('input[name="overpaymentMode"]:checked').value;
-    const fixYears = parseInt(fixYearsInput.value);
 
     // --- Validate Inputs ---
     if (isNaN(principal) || principal <= 0) { showError("Invalid principal amount."); return; }
     if (isNaN(termYears) || termYears <= 0) { showError("Invalid term."); return; }
     if (isNaN(paymentAmount) || paymentAmount <= 0) { showError("Invalid payment amount."); return; }
-    if (isNaN(fixYears) || fixYears < 1) { showError("Invalid fixed period length."); return; }
-    if (interestRates.some(isNaN)) { showError("Please fill in all interest rate fields."); return; }
-    if (interestRates.length === 0) { showError("Please add at least one interest rate period."); return; }
+    if (interestRatePeriodsDiv.children.length === 0) { showError("Please add at least one interest rate period."); return; }
+    if (ratePeriods === null) { showError("Please fill in every rate period: length in months, rate, and fee (0 for none)."); return; }
 
-    syncFullRepaymentOptions(termYears, fixYears);
+    syncFullRepaymentOptions(ratePeriods, termYears * 12);
     const fullRepaymentMonth = fullRepaymentSelect.value === '' ? null : parseInt(fullRepaymentSelect.value);
 
-    const inputs = { principal, termYears, paymentAmount, annualRates: interestRates, fullRepaymentMonth, fixYears };
+    const inputs = { principal, termYears, paymentAmount, ratePeriods, fullRepaymentMonth };
     const reducePayment = simulate({ ...inputs, overpaymentMode: 'reducePayment' });
     const reduceTerm = simulate({ ...inputs, overpaymentMode: 'reduceTerm' });
     const result = overpaymentMode === 'reducePayment' ? reducePayment : reduceTerm;
 
-    updateModeComparison(overpaymentMode, reducePayment, reduceTerm, fixYears * 12);
+    updateModeComparison(overpaymentMode, reducePayment, reduceTerm);
     updateConsolidationPanel(inputs, overpaymentMode, result);
 
     const infos = [];
+    if (result.totalFees > 0) {
+        infos.push(`Product fees totalling ${gbp(result.totalFees)} were added to the loan at the start of the fixed periods.`);
+    }
     if (result.fullRepayment) {
         infos.push(`The remaining balance of ${gbp(result.fullRepayment.amount)} is repaid in full at the end of year ${result.fullRepayment.month / 12} — the end of a fixed period, so no early repayment charge applies.`);
     }
@@ -157,7 +183,7 @@ function renderExitComparison(activeMode, reducePayment, reduceTerm) {
     modeComparisonEl.textContent = `Up to the planned exit at the end of year ${exitYear}, ${activeName} ${interestPhrase} ${otherName}, with ${outlayPhrase} (final repayment ${gbpWhole(active.fullRepayment.amount)} vs ${gbpWhole(other.fullRepayment.amount)}). The contractual minimum just before exit is ${gbpWhole(minActive)}/month against ${gbpWhole(minOther)} — ${minimumPhrase}.`;
 }
 
-function updateModeComparison(activeMode, reducePayment, reduceTerm, fixMonths) {
+function updateModeComparison(activeMode, reducePayment, reduceTerm) {
     if (reducePayment.fullRepayment && reduceTerm.fullRepayment) {
         renderExitComparison(activeMode, reducePayment, reduceTerm);
         modeComparisonEl.classList.remove('hidden');
@@ -166,8 +192,8 @@ function updateModeComparison(activeMode, reducePayment, reduceTerm, fixMonths) 
     const extraInterest = reducePayment.totalInterest - reduceTerm.totalInterest;
     const gap = gbpWhole(Math.abs(extraInterest));
     const similarCost = Math.abs(extraInterest) < 1;
-    const lowMinimum = gbpWhole(finalPeriodContractual(reducePayment, fixMonths));
-    const highMinimum = gbpWhole(finalPeriodContractual(reduceTerm, fixMonths));
+    const lowMinimum = gbpWhole(finalPeriodContractual(reducePayment));
+    const highMinimum = gbpWhole(finalPeriodContractual(reduceTerm));
 
     if (activeMode === 'reducePayment') {
         const cost = similarCost
@@ -249,19 +275,25 @@ function showInfo(message) {
 
 // --- Dynamic Rate Period Management ---
 
-function addRatePeriod(rateValue = '') {
+function addRatePeriod(months = '', rateValue = '', fee = '') {
+    const inputClass = 'px-2 py-1 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500';
     const periodDiv = document.createElement('div');
-    periodDiv.className = 'flex items-center gap-2 mb-2';
+    periodDiv.className = 'flex items-center gap-2';
     periodDiv.innerHTML = `
-        <label class="text-sm font-medium text-gray-600 w-2/5"></label>
-        <div class="relative flex-1">
-            <input type="number" value="${rateValue}" step="0.01" class="rate-input w-full pr-10 px-4 py-1 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., 5.5">
-            <span class="absolute right-0 top-0 h-full pr-4 flex items-center text-gray-400">%</span>
-        </div>
-        <button type="button" class="remove-rate text-gray-400 hover:text-red-500 text-xl leading-none px-1" title="Remove this rate period" aria-label="Remove this rate period">&times;</button>
+        <span class="period-range text-xs text-gray-500 w-16 shrink-0"></span>
+        <input type="number" value="${months}" min="1" step="1" class="months-input w-16 shrink-0 ${inputClass}" placeholder="24" aria-label="Fix length in months">
+        <input type="number" value="${rateValue}" step="0.01" class="rate-input flex-1 min-w-0 ${inputClass}" placeholder="5.5" aria-label="Interest rate in percent">
+        <input type="number" value="${fee}" min="0" step="1" class="fee-input w-20 shrink-0 ${inputClass}" placeholder="999" aria-label="Product fee in pounds">
+        <button type="button" class="remove-rate w-5 shrink-0 text-gray-400 hover:text-red-500 text-xl leading-none" title="Remove this rate period" aria-label="Remove this rate period">&times;</button>
     `;
     interestRatePeriodsDiv.appendChild(periodDiv);
-    periodDiv.querySelector('input').addEventListener('input', runSimulation);
+    periodDiv.querySelector('.months-input').addEventListener('input', () => {
+        relabelRatePeriods();
+        runSimulation();
+    });
+    [periodDiv.querySelector('.rate-input'), periodDiv.querySelector('.fee-input')].forEach(input => {
+        input.addEventListener('input', runSimulation);
+    });
     periodDiv.querySelector('.remove-rate').addEventListener('click', () => {
         periodDiv.remove();
         relabelRatePeriods();
@@ -270,16 +302,18 @@ function addRatePeriod(rateValue = '') {
     relabelRatePeriods();
 }
 
-// Keep "Years X-Y" labels and rate-N ids consistent with row order and
-// the current fixed-period length.
+// Show each row's cumulative month range, derived from the durations above it
 function relabelRatePeriods() {
-    const fixYears = currentFixYears();
+    let start = 0;
     Array.from(interestRatePeriodsDiv.children).forEach((row, index) => {
-        const label = row.querySelector('label');
-        const input = row.querySelector('input');
-        input.id = `rate-${index}`;
-        label.htmlFor = `rate-${index}`;
-        label.textContent = `Years ${index * fixYears}-${(index + 1) * fixYears}`;
+        const months = parseInt(row.querySelector('.months-input').value);
+        const rangeEl = row.querySelector('.period-range');
+        if (isNaN(months) || months < 1) {
+            rangeEl.textContent = `#${index + 1}`;
+        } else {
+            rangeEl.textContent = `${start}–${start + months} mo`;
+            start += months;
+        }
     });
 }
 
@@ -395,13 +429,17 @@ function createChart() {
 document.addEventListener('DOMContentLoaded', () => {
     createChart();
     // Add initial rate periods with new defaults
-    addRatePeriod(4.64);
-    addRatePeriod(4.29);
-    addRatePeriod(3.94);
+    addRatePeriod(24, 4.64, 0);
+    addRatePeriod(24, 4.29, 0);
+    addRatePeriod(24, 3.94, 0);
     runSimulation();
 });
 
-addRateBtn.addEventListener('click', () => addRatePeriod());
+addRateBtn.addEventListener('click', () => {
+    const lastRow = interestRatePeriodsDiv.lastElementChild;
+    const lastMonths = lastRow ? parseInt(lastRow.querySelector('.months-input').value) : NaN;
+    addRatePeriod(isNaN(lastMonths) || lastMonths < 1 ? 24 : lastMonths);
+});
 [principalInput, termInput, paymentAmountInput].forEach(input => {
     input.addEventListener('input', runSimulation);
 });
@@ -409,10 +447,6 @@ document.querySelectorAll('input[name="overpaymentMode"]').forEach(radio => {
     radio.addEventListener('change', runSimulation);
 });
 fullRepaymentSelect.addEventListener('change', runSimulation);
-fixYearsInput.addEventListener('input', () => {
-    relabelRatePeriods();
-    runSimulation();
-});
 [consolidationAmountInput, consolidationRateInput, consolidationTermInput].forEach(input => {
     input.addEventListener('input', runSimulation);
 });

@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { amortizingPayment, impliedRemainingTerm, simulate, standaloneLoanCost } from './simulation.js';
 
-const pct = rates => rates.map(r => r / 100);
+// [months, rate%, fee?] tuples → ratePeriods
+const fix = list => list.map(([months, rate, fee = 0]) => ({ months, rate: rate / 100, fee }));
 
 const base = {
     principal: 200000,
     termYears: 25,
-    annualRates: pct([5]),
+    ratePeriods: fix([[24, 5]]),
     overpaymentMode: 'reduceTerm',
 };
 const baseContractual = amortizingPayment(200000, 0.05 / 12, 300);
@@ -104,16 +105,49 @@ describe('simulate', () => {
         expect(r.months).toBe(300);
         expect(r.totalOverpayments).toBeCloseTo(0, 6);
         for (const row of r.schedule) {
-            expect(row.payment).toBeGreaterThanOrEqual(Math.min(row.contractual, row.payment));
             expect(row.payment).toBeCloseTo(row.contractual, 6);
         }
     });
 
     it('carries the last rate forward past the end of the schedule', () => {
-        const short = simulate({ ...base, annualRates: pct([5, 3]), paymentAmount: 1500 });
-        const padded = simulate({ ...base, annualRates: pct([5, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]), paymentAmount: 1500 });
+        const short = simulate({ ...base, ratePeriods: fix([[24, 5], [24, 3]]), paymentAmount: 1500 });
+        const padded = simulate({
+            ...base,
+            ratePeriods: fix([[24, 5], ...Array.from({ length: 12 }, () => [24, 3])]),
+            paymentAmount: 1500,
+        });
         expect(short.months).toBe(padded.months);
         expect(short.totalInterest).toBeCloseTo(padded.totalInterest, 6);
+    });
+
+    it('honours per-line fix durations', () => {
+        const twoYear = simulate({ ...base, ratePeriods: fix([[24, 5], [24, 3]]), paymentAmount: 1500 });
+        const fiveYear = simulate({ ...base, ratePeriods: fix([[60, 5], [60, 3]]), paymentAmount: 1500 });
+        // The rate drop lands at month 25 for a 24-month fix but only at month 61 for a 60-month fix
+        expect(twoYear.schedule[24].interest).toBeLessThan(twoYear.schedule[23].interest * 0.99);
+        expect(fiveYear.schedule[24].interest).toBeGreaterThan(fiveYear.schedule[23].interest * 0.99);
+        expect(fiveYear.schedule[60].interest).toBeLessThan(fiveYear.schedule[59].interest * 0.9);
+        // Longer at the higher initial rate costs more overall
+        expect(fiveYear.totalInterest).toBeGreaterThan(twoYear.totalInterest);
+    });
+
+    it('rolls the product fee into the loan at the start of its fix', () => {
+        const noFee = simulate({ ...base, paymentAmount: 1500 });
+        const withFee = simulate({ ...base, ratePeriods: fix([[24, 5, 999]]), paymentAmount: 1500 });
+        // Entered once, charged once — carried-forward repeats are fee-free
+        expect(withFee.totalFees).toBe(999);
+        expect(withFee.initialContractualPayment).toBeGreaterThan(noFee.initialContractualPayment);
+        expect(withFee.totalInterest).toBeGreaterThan(noFee.totalInterest);
+        expect(totalPaid(withFee) - withFee.totalInterest).toBeCloseTo(base.principal + 999, 4);
+    });
+
+    it('adds a later fix fee to the balance at that boundary', () => {
+        const r = simulate({ ...base, ratePeriods: fix([[24, 5, 0], [24, 4, 500]]), paymentAmount: 1500 });
+        expect(r.totalFees).toBe(500);
+        const prev = r.schedule[23];
+        const row = r.schedule[24];
+        expect(row.balance).toBeCloseTo(prev.balance + 500 - (row.payment - row.interest), 6);
+        expect(totalPaid(r) - r.totalInterest).toBeCloseTo(base.principal + 500, 4);
     });
 
     it('repays in full at the end of the chosen fixed period', () => {
@@ -152,17 +186,6 @@ describe('simulate', () => {
         expect(boosted.schedule[60].payment).toBeLessThan(boosted.schedule[59].payment);
         expect(boosted.totalInterest).toBeLessThan(plain.totalInterest);
         expect(boosted.months).toBeLessThanOrEqual(plain.months);
-    });
-
-    it('honours a custom fixed-period length', () => {
-        const twoYear = simulate({ ...base, annualRates: pct([5, 3]), paymentAmount: 1500 });
-        const fiveYear = simulate({ ...base, annualRates: pct([5, 3]), paymentAmount: 1500, fixYears: 5 });
-        // The rate drop lands at month 25 for 2-year fixes but only at month 61 for 5-year fixes
-        expect(twoYear.schedule[24].interest).toBeLessThan(twoYear.schedule[23].interest * 0.99);
-        expect(fiveYear.schedule[24].interest).toBeGreaterThan(fiveYear.schedule[23].interest * 0.99);
-        expect(fiveYear.schedule[60].interest).toBeLessThan(fiveYear.schedule[59].interest * 0.9);
-        // Longer at the higher initial rate costs more overall
-        expect(fiveYear.totalInterest).toBeGreaterThan(twoYear.totalInterest);
     });
 
     it('keeps the payment level across rate changes in reduceTerm mode when rates are flat', () => {
