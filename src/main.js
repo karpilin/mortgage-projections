@@ -3,10 +3,7 @@ import './style.css';
 import { simulate, standaloneLoanCost } from './simulation.js';
 
 // --- Static DOM Elements ---
-const payoffTimeEl = document.getElementById('payoffTime');
-const totalInterestEl = document.getElementById('totalInterest');
-const initialContractualPaymentEl = document.getElementById('initialContractualPayment');
-const totalOverpaymentsEl = document.getElementById('totalOverpayments');
+const mortgageASummaryEl = document.getElementById('mortgage-a-summary');
 const errorMessageEl = document.getElementById('error-message');
 const infoMessageEl = document.getElementById('info-message');
 const modeComparisonEl = document.getElementById('mode-comparison');
@@ -48,8 +45,8 @@ function finalPeriodContractual(result) {
 function mortgageFormHTML(prefix) {
     const input = 'border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500';
     return `
-        <fieldset>
-            <legend class="text-lg font-medium text-gray-900">Loan Details</legend>
+        <details open>
+            <summary class="text-lg font-medium text-gray-900 cursor-pointer select-none">Loan Details</summary>
             <div class="space-y-6 mt-4">
                 <div>
                     <label for="${prefix}-principal" class="block text-sm font-medium text-gray-700 mb-1">Total Principal</label>
@@ -78,10 +75,10 @@ function mortgageFormHTML(prefix) {
                     <p class="mt-1 text-xs text-gray-500">At the end of a fixed period the mortgage can be cleared without an early repayment charge, so the 10% cap doesn't apply.</p>
                 </div>
             </div>
-        </fieldset>
+        </details>
 
-        <fieldset class="border-t border-gray-200 pt-6">
-            <legend class="text-lg font-medium text-gray-900">Overpayment Effect</legend>
+        <details class="border-t border-gray-200 pt-6" open>
+            <summary class="text-lg font-medium text-gray-900 cursor-pointer select-none">Overpayment Effect</summary>
             <p class="mt-1 text-sm text-gray-500">How the lender recalculates the contractual payment at each rate change.</p>
             <div class="mt-4 space-y-3">
                 <label class="flex items-start gap-3 cursor-pointer">
@@ -99,10 +96,10 @@ function mortgageFormHTML(prefix) {
                     </span>
                 </label>
             </div>
-        </fieldset>
+        </details>
 
-        <fieldset class="border-t border-gray-200 pt-6 min-w-0">
-            <legend class="text-lg font-medium text-gray-900">Interest Rate Schedule</legend>
+        <details class="border-t border-gray-200 pt-6 min-w-0" open>
+            <summary class="text-lg font-medium text-gray-900 cursor-pointer select-none">Interest Rate Schedule</summary>
             <p class="mt-1 text-sm text-gray-500">One line per fix: length, rate, and product fee (added to the loan at the start of the fix). The last line's terms carry forward, fee-free, until payoff.</p>
             <div class="mt-4 flex items-center gap-2 text-xs font-medium text-gray-500">
                 <span class="w-16 shrink-0">Period</span>
@@ -113,7 +110,7 @@ function mortgageFormHTML(prefix) {
             </div>
             <div class="rate-periods mt-2 space-y-2"></div>
             <button type="button" class="add-rate mt-2 text-sm font-medium text-indigo-600 hover:text-indigo-500">+ Add Rate Period</button>
-        </fieldset>
+        </details>
     `;
 }
 
@@ -316,7 +313,7 @@ function runSimulation() {
         } else {
             const resultB = simulate({ ...b.inputs, overpaymentMode: b.overpaymentMode });
             graphsB = buildGraphData(resultB, b.inputs.principal);
-            updateMortgageBSummary(resultB, result);
+            renderMortgageSummary(mortgageBSummaryEl, resultB, result);
         }
     }
 
@@ -424,34 +421,38 @@ function updateConsolidationPanel(inputs, overpaymentMode, baseline) {
     consolidationPanelEl.classList.remove('hidden');
 }
 
-function updateMortgageBSummary(resultB, resultA) {
-    const interestDelta = resultB.totalInterest - resultA.totalInterest;
-    const monthsDelta = resultB.months - resultA.months;
-    const deltaParts = [];
-    if (Math.abs(interestDelta) >= 1) {
-        deltaParts.push(`${gbpWhole(Math.abs(interestDelta))} ${interestDelta > 0 ? 'more' : 'less'} interest`);
-    }
-    if (monthsDelta !== 0) {
-        deltaParts.push(`pays off ${formatDuration(Math.abs(monthsDelta))} ${monthsDelta > 0 ? 'later' : 'sooner'}`);
-    }
-
+// Renders the summary card used by both mortgage columns; pass a baseline
+// result to append a delta line (Mortgage B vs A).
+function renderMortgageSummary(el, result, baseline) {
     const rows = [
-        ['Payoff time', formatPayoff(resultB.months)],
-        ['Total interest', gbp(resultB.totalInterest)],
-        ['Product fees', gbp(resultB.totalFees)],
-        ['Total overpayments', gbp(resultB.totalOverpayments)],
+        ['Payoff time', formatPayoff(result.months)],
+        ['Total interest', gbp(result.totalInterest)],
+        ['Initial contractual payment', gbp(result.initialContractualPayment)],
+        ['Product fees', gbp(result.totalFees)],
+        ['Total overpayments', gbp(result.totalOverpayments)],
     ];
-    mortgageBSummaryEl.innerHTML = rows.map(([label, value]) =>
+    let html = rows.map(([label, value]) =>
         `<div class="flex justify-between gap-2"><span class="text-gray-500">${label}</span><span class="font-semibold text-indigo-600">${value}</span></div>`
-    ).join('') + `<div class="pt-2 mt-2 border-t border-gray-200 text-gray-600">${deltaParts.length ? `vs Mortgage A: ${deltaParts.join(', ')}.` : 'Matches Mortgage A.'}</div>`;
-    mortgageBSummaryEl.classList.remove('hidden');
+    ).join('');
+
+    if (baseline) {
+        const interestDelta = result.totalInterest - baseline.totalInterest;
+        const monthsDelta = result.months - baseline.months;
+        const deltaParts = [];
+        if (Math.abs(interestDelta) >= 1) {
+            deltaParts.push(`${gbpWhole(Math.abs(interestDelta))} ${interestDelta > 0 ? 'more' : 'less'} interest`);
+        }
+        if (monthsDelta !== 0) {
+            deltaParts.push(`pays off ${formatDuration(Math.abs(monthsDelta))} ${monthsDelta > 0 ? 'later' : 'sooner'}`);
+        }
+        html += `<div class="pt-2 mt-2 border-t border-gray-200 text-gray-600">${deltaParts.length ? `vs Mortgage A: ${deltaParts.join(', ')}.` : 'Matches Mortgage A.'}</div>`;
+    }
+    el.innerHTML = html;
+    el.classList.remove('hidden');
 }
 
 function updateUI(result, graphs, graphsB) {
-    payoffTimeEl.textContent = formatPayoff(result.months);
-    totalInterestEl.textContent = gbp(result.totalInterest);
-    initialContractualPaymentEl.textContent = gbp(result.initialContractualPayment);
-    totalOverpaymentsEl.textContent = gbp(result.totalOverpayments);
+    renderMortgageSummary(mortgageASummaryEl, result, null);
 
     const datasets = payoffChart.data.datasets;
     datasets[0].data = graphs.interest;
