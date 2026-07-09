@@ -47,13 +47,17 @@ export function impliedRemainingTerm(balance, monthlyRate, payment) {
  * @param {number[]} inputs.annualRates - Decimal rates (0.0464 = 4.64%), one
  *   per 2-year fix; the last one carries forward.
  * @param {'reducePayment'|'reduceTerm'} [inputs.overpaymentMode]
+ * @param {number|null} [inputs.fullRepaymentMonth] - Month after which the
+ *   remaining balance is repaid as a lump sum (the end of a fixed period, so
+ *   the 10% cap does not apply to it). Ignored if the loan clears earlier.
  * @returns {{months: number, totalInterest: number, totalOverpayments: number,
  *   initialContractualPayment: number, capHit: boolean,
  *   paymentBelowContractual: boolean,
+ *   fullRepayment: {month: number, amount: number}|null,
  *   schedule: Array<{month: number, interest: number, payment: number,
  *   contractual: number, balance: number}>}}
  */
-export function simulate({ principal, termYears, paymentAmount, annualRates, overpaymentMode = 'reducePayment' }) {
+export function simulate({ principal, termYears, paymentAmount, annualRates, overpaymentMode = 'reducePayment', fullRepaymentMonth = null }) {
     const totalMonths = termYears * 12;
 
     let balance = principal;
@@ -65,6 +69,7 @@ export function simulate({ principal, termYears, paymentAmount, annualRates, ove
     let overpaidThisYear = 0;
     let capHit = false;
     let paymentBelowContractual = false;
+    let fullRepayment = null;
     const schedule = [];
 
     const initialContractualPayment = amortizingPayment(principal, annualRates[0] / 12, totalMonths);
@@ -118,6 +123,11 @@ export function simulate({ principal, termYears, paymentAmount, annualRates, ove
         totalOverpayments += overpayment;
         months++;
         schedule.push({ month: months, interest, payment, contractual, balance });
+
+        if (fullRepaymentMonth !== null && months >= fullRepaymentMonth && balance > 0) {
+            fullRepayment = { month: months, amount: balance };
+            balance = 0;
+        }
     }
 
     return {
@@ -127,6 +137,7 @@ export function simulate({ principal, termYears, paymentAmount, annualRates, ove
         initialContractualPayment,
         capHit,
         paymentBelowContractual,
+        fullRepayment,
         schedule,
     };
 }

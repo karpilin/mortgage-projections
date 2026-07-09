@@ -6,6 +6,7 @@ import { simulate } from './simulation.js';
 const principalInput = document.getElementById('principal');
 const termInput = document.getElementById('term');
 const paymentAmountInput = document.getElementById('paymentAmount');
+const fullRepaymentSelect = document.getElementById('fullRepayment');
 const interestRatePeriodsDiv = document.getElementById('interestRatePeriods');
 const addRateBtn = document.getElementById('addRateBtn');
 
@@ -26,6 +27,26 @@ const formatPayoff = months => `${Math.floor(months / 12)} years, ${months % 12}
 // Contractual payment in force during the loan's final fixed period
 function finalPeriodContractual(result) {
     return result.schedule[Math.floor((result.months - 1) / 24) * 24].contractual;
+}
+
+let repaymentOptionsTermYears = null;
+
+// Offer every 2-year fix boundary within the current term, keeping the
+// user's selection when it's still valid.
+function syncFullRepaymentOptions(termYears) {
+    if (repaymentOptionsTermYears === termYears) return;
+    repaymentOptionsTermYears = termYears;
+    const previous = fullRepaymentSelect.value;
+    fullRepaymentSelect.innerHTML = '<option value="">No — run to payoff</option>';
+    for (let year = 2; year < termYears; year += 2) {
+        const option = document.createElement('option');
+        option.value = String(year * 12);
+        option.textContent = `End of year ${year}`;
+        fullRepaymentSelect.appendChild(option);
+    }
+    if (Array.from(fullRepaymentSelect.options).some(o => o.value === previous)) {
+        fullRepaymentSelect.value = previous;
+    }
 }
 
 // --- Simulation ---
@@ -49,7 +70,10 @@ function runSimulation() {
     if (interestRates.some(isNaN)) { showError("Please fill in all interest rate fields."); return; }
     if (interestRates.length === 0) { showError("Please add at least one interest rate period."); return; }
 
-    const inputs = { principal, termYears, paymentAmount, annualRates: interestRates };
+    syncFullRepaymentOptions(termYears);
+    const fullRepaymentMonth = fullRepaymentSelect.value === '' ? null : parseInt(fullRepaymentSelect.value);
+
+    const inputs = { principal, termYears, paymentAmount, annualRates: interestRates, fullRepaymentMonth };
     const reducePayment = simulate({ ...inputs, overpaymentMode: 'reducePayment' });
     const reduceTerm = simulate({ ...inputs, overpaymentMode: 'reduceTerm' });
     const result = overpaymentMode === 'reducePayment' ? reducePayment : reduceTerm;
@@ -57,6 +81,9 @@ function runSimulation() {
     updateModeComparison(overpaymentMode, reducePayment, reduceTerm);
 
     const infos = [];
+    if (result.fullRepayment) {
+        infos.push(`The remaining balance of ${gbp(result.fullRepayment.amount)} is repaid in full at the end of year ${result.fullRepayment.month / 12} — the end of a fixed period, so no early repayment charge applies.`);
+    }
     if (result.paymentBelowContractual) {
         infos.push("Your payment is below the contractual monthly payment in one or more months; the contractual payment was paid instead.");
     }
@@ -72,6 +99,9 @@ function runSimulation() {
         { x: 0, y: principal },
         ...result.schedule.map(row => ({ x: row.month / 12, y: Math.max(0, row.balance) })),
     ];
+    if (result.fullRepayment) {
+        principalGraphData.push({ x: result.fullRepayment.month / 12, y: 0 });
+    }
 
     updateUI(result, interestGraphData, paymentGraphData, principalGraphData, contractualGraphData);
 }
@@ -266,3 +296,4 @@ addRateBtn.addEventListener('click', () => addRatePeriod());
 document.querySelectorAll('input[name="overpaymentMode"]').forEach(radio => {
     radio.addEventListener('change', runSimulation);
 });
+fullRepaymentSelect.addEventListener('change', runSimulation);
