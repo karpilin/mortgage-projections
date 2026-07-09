@@ -107,6 +107,35 @@ describe('simulate', () => {
         expect(short.totalInterest).toBeCloseTo(padded.totalInterest, 6);
     });
 
+    it('repays in full at the end of the chosen fixed period', () => {
+        const r = simulate({ ...base, paymentAmount: 1500, fullRepaymentMonth: 48 });
+        expect(r.months).toBe(48);
+        expect(r.schedule.length).toBe(48);
+        expect(r.fullRepayment.month).toBe(48);
+        expect(r.fullRepayment.amount).toBeGreaterThan(0);
+        expect(r.fullRepayment.amount).toBeCloseTo(r.schedule.at(-1).balance, 10);
+        // Conservation now includes the lump sum
+        expect(totalPaid(r) + r.fullRepayment.amount - r.totalInterest).toBeCloseTo(base.principal, 4);
+        const natural = simulate({ ...base, paymentAmount: 1500 });
+        expect(r.totalInterest).toBeLessThan(natural.totalInterest);
+    });
+
+    it('does not restrict the lump repayment by the 10% cap', () => {
+        const r = simulate({ ...base, paymentAmount: 1500, fullRepaymentMonth: 24 });
+        // The lump is far larger than the annual cap and is not counted as an overpayment
+        expect(r.fullRepayment.amount).toBeGreaterThan(base.principal * 0.10);
+        const monthlyOverpaid = r.schedule.reduce((sum, row) => sum + (row.payment - row.contractual), 0);
+        expect(r.totalOverpayments).toBeCloseTo(monthlyOverpaid, 6);
+    });
+
+    it('ignores a planned repayment after the natural payoff', () => {
+        const natural = simulate({ ...base, paymentAmount: 2000 });
+        const r = simulate({ ...base, paymentAmount: 2000, fullRepaymentMonth: natural.months + 24 });
+        expect(r.fullRepayment).toBeNull();
+        expect(r.months).toBe(natural.months);
+        expect(r.totalInterest).toBeCloseTo(natural.totalInterest, 8);
+    });
+
     it('keeps the payment level across rate changes in reduceTerm mode when rates are flat', () => {
         const r = simulate({ ...base, paymentAmount: 1500 });
         // With a single flat rate, a reduceTerm recalculation should not move
