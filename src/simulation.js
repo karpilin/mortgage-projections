@@ -36,6 +36,16 @@ export function impliedRemainingTerm(balance, monthlyRate, payment) {
 }
 
 /**
+ * Cost of borrowing `amount` as a standalone amortizing loan (car loan,
+ * personal loan) — the benchmark that mortgage consolidation is compared to.
+ */
+export function standaloneLoanCost(amount, annualRate, termYears) {
+    const months = termYears * 12;
+    const monthlyPayment = amortizingPayment(amount, annualRate / 12, months);
+    return { monthlyPayment, totalInterest: monthlyPayment * months - amount };
+}
+
+/**
  * Runs the month-by-month simulation.
  *
  * @param {object} inputs
@@ -47,6 +57,9 @@ export function impliedRemainingTerm(balance, monthlyRate, payment) {
  *   per fixed period; the last one carries forward.
  * @param {'reducePayment'|'reduceTerm'} [inputs.overpaymentMode]
  * @param {number} [inputs.fixYears] - Length of each fixed-rate period in years.
+ * @param {{monthlyAmount: number, months: number}|null} [inputs.extraPayment] -
+ *   Additional monthly payment applied only for the first `months` months
+ *   (e.g. a redirected standalone-loan payment). Still subject to the cap.
  * @param {number|null} [inputs.fullRepaymentMonth] - Month after which the
  *   remaining balance is repaid as a lump sum (the end of a fixed period, so
  *   the 10% cap does not apply to it). Ignored if the loan clears earlier.
@@ -57,7 +70,7 @@ export function impliedRemainingTerm(balance, monthlyRate, payment) {
  *   schedule: Array<{month: number, interest: number, payment: number,
  *   contractual: number, balance: number}>}}
  */
-export function simulate({ principal, termYears, paymentAmount, annualRates, overpaymentMode = 'reducePayment', fullRepaymentMonth = null, fixYears = 2 }) {
+export function simulate({ principal, termYears, paymentAmount, annualRates, overpaymentMode = 'reducePayment', fullRepaymentMonth = null, fixYears = 2, extraPayment = null }) {
     const totalMonths = termYears * 12;
     const fixMonths = fixYears * 12;
 
@@ -102,9 +115,11 @@ export function simulate({ principal, termYears, paymentAmount, annualRates, ove
         }
 
         const interest = balance * monthlyRate;
-        if (paymentAmount < contractual) paymentBelowContractual = true;
+        const targetPayment = paymentAmount
+            + (extraPayment && months < extraPayment.months ? extraPayment.monthlyAmount : 0);
+        if (targetPayment < contractual) paymentBelowContractual = true;
 
-        const intendedOverpayment = Math.max(0, paymentAmount - contractual);
+        const intendedOverpayment = Math.max(0, targetPayment - contractual);
         let overpayment = Math.min(intendedOverpayment, Math.max(0, cap - overpaidThisYear));
         if (intendedOverpayment > overpayment) capHit = true;
 

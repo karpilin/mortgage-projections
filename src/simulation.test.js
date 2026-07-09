@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { amortizingPayment, impliedRemainingTerm, simulate } from './simulation.js';
+import { amortizingPayment, impliedRemainingTerm, simulate, standaloneLoanCost } from './simulation.js';
 
 const pct = rates => rates.map(r => r / 100);
 
@@ -34,6 +34,15 @@ describe('impliedRemainingTerm', () => {
 
     it('is Infinity when the payment only covers interest', () => {
         expect(impliedRemainingTerm(100000, 0.05 / 12, (100000 * 0.05) / 12)).toBe(Infinity);
+    });
+});
+
+describe('standaloneLoanCost', () => {
+    it('matches the textbook amortizing loan cost', () => {
+        // £10,000 at 10% APR over 5 years
+        const { monthlyPayment, totalInterest } = standaloneLoanCost(10000, 0.10, 5);
+        expect(monthlyPayment).toBeCloseTo(212.47, 2);
+        expect(totalInterest).toBeCloseTo(2748.23, 1);
     });
 });
 
@@ -134,6 +143,15 @@ describe('simulate', () => {
         expect(r.fullRepayment).toBeNull();
         expect(r.months).toBe(natural.months);
         expect(r.totalInterest).toBeCloseTo(natural.totalInterest, 8);
+    });
+
+    it('applies a time-limited extra payment only while it runs', () => {
+        const plain = simulate({ ...base, paymentAmount: 1500 });
+        const boosted = simulate({ ...base, paymentAmount: 1500, extraPayment: { monthlyAmount: 400, months: 60 } });
+        expect(boosted.schedule[0].payment).toBeCloseTo(plain.schedule[0].payment + 400, 6);
+        expect(boosted.schedule[60].payment).toBeLessThan(boosted.schedule[59].payment);
+        expect(boosted.totalInterest).toBeLessThan(plain.totalInterest);
+        expect(boosted.months).toBeLessThanOrEqual(plain.months);
     });
 
     it('honours a custom fixed-period length', () => {
