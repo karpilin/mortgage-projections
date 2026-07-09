@@ -1,4 +1,5 @@
 import Chart from 'chart.js/auto';
+import './style.css';
 
 // --- DOM Elements ---
 const principalInput = document.getElementById('principal');
@@ -100,7 +101,7 @@ function runSimulation() {
             capHasBeenHit = true;
         }
 
-        const finalPaymentThisMonth = minimumMonthlyPayment + actualOverpayment;
+        let finalPaymentThisMonth = minimumMonthlyPayment + actualOverpayment;
 
         if (finalPaymentThisMonth < interestForMonth && balance > 0) {
             showError(`Payment of £${finalPaymentThisMonth.toFixed(2)} is not enough to cover interest of £${interestForMonth.toFixed(2)} in month ${months+1}.`);
@@ -108,9 +109,16 @@ function runSimulation() {
             return;
         }
 
-        const principalPaid = finalPaymentThisMonth - interestForMonth;
-
-        balance -= principalPaid;
+        // In the final month, pay only what clears the balance and count only
+        // the overpayment actually needed.
+        const payoffAmount = balance + interestForMonth;
+        if (finalPaymentThisMonth >= payoffAmount) {
+            finalPaymentThisMonth = payoffAmount;
+            actualOverpayment = Math.max(0, finalPaymentThisMonth - minimumMonthlyPayment);
+            balance = 0;
+        } else {
+            balance -= finalPaymentThisMonth - interestForMonth;
+        }
         totalInterestPaid += interestForMonth;
         overpaymentsThisYear += actualOverpayment;
         totalOverpaymentsMade += actualOverpayment;

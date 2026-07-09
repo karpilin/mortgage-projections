@@ -35,10 +35,6 @@ You need to have [Node.js](https://nodejs.org/) and npm (which comes with Node.j
    This command will install all the necessary dependencies listed in package.json, including Vite, Tailwind CSS, and Chart.js.  
    `npm install`
 
-3. Initialize Tailwind CSS:  
-   This command runs the tailwindcss init script to create the tailwind.config.js and postcss.config.js configuration files.  
-   `npm run tailwind:init`
-
 ## **Usage**
 
 The project includes several npm scripts to handle development and building.
