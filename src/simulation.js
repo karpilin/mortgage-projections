@@ -1,14 +1,13 @@
 // Pure simulation logic — no DOM access, so it can be unit tested.
 //
 // Model: the lender sets a contractual monthly payment that stays fixed
-// within each 2-year rate period and is recalculated at every rate change.
+// within each fixed-rate period and is recalculated at every rate change.
 // Overpayments are measured against the contractual payment and capped at
 // 10% of the balance as it stood at the start of each year. What a rate-change
 // recalculation targets depends on the overpayment mode:
 //   - 'reduceTerm':    keep the payment level; overpayments shorten the loan.
 //   - 'reducePayment': keep the original end date; the payment drops instead.
 
-const FIX_MONTHS = 24;
 const CAP_RATE = 0.10;
 
 /**
@@ -45,8 +44,9 @@ export function impliedRemainingTerm(balance, monthlyRate, payment) {
  * @param {number} inputs.paymentAmount - What the borrower actually pays each
  *   month (never less than the contractual payment).
  * @param {number[]} inputs.annualRates - Decimal rates (0.0464 = 4.64%), one
- *   per 2-year fix; the last one carries forward.
+ *   per fixed period; the last one carries forward.
  * @param {'reducePayment'|'reduceTerm'} [inputs.overpaymentMode]
+ * @param {number} [inputs.fixYears] - Length of each fixed-rate period in years.
  * @param {number|null} [inputs.fullRepaymentMonth] - Month after which the
  *   remaining balance is repaid as a lump sum (the end of a fixed period, so
  *   the 10% cap does not apply to it). Ignored if the loan clears earlier.
@@ -57,8 +57,9 @@ export function impliedRemainingTerm(balance, monthlyRate, payment) {
  *   schedule: Array<{month: number, interest: number, payment: number,
  *   contractual: number, balance: number}>}}
  */
-export function simulate({ principal, termYears, paymentAmount, annualRates, overpaymentMode = 'reducePayment', fullRepaymentMonth = null }) {
+export function simulate({ principal, termYears, paymentAmount, annualRates, overpaymentMode = 'reducePayment', fullRepaymentMonth = null, fixYears = 2 }) {
     const totalMonths = termYears * 12;
+    const fixMonths = fixYears * 12;
 
     let balance = principal;
     let months = 0;
@@ -75,17 +76,17 @@ export function simulate({ principal, termYears, paymentAmount, annualRates, ove
     const initialContractualPayment = amortizingPayment(principal, annualRates[0] / 12, totalMonths);
 
     while (balance > 0 && months < totalMonths) {
-        const rateIndex = Math.min(Math.floor(months / FIX_MONTHS), annualRates.length - 1);
+        const rateIndex = Math.min(Math.floor(months / fixMonths), annualRates.length - 1);
         const monthlyRate = annualRates[rateIndex] / 12;
 
         if (months === 0) {
             contractual = initialContractualPayment;
-        } else if (months % FIX_MONTHS === 0) {
+        } else if (months % fixMonths === 0) {
             const remainingMonths = totalMonths - months;
             if (overpaymentMode === 'reducePayment') {
                 contractual = amortizingPayment(balance, monthlyRate, remainingMonths);
             } else {
-                const previousRate = annualRates[Math.min(Math.floor((months - 1) / FIX_MONTHS), annualRates.length - 1)] / 12;
+                const previousRate = annualRates[Math.min(Math.floor((months - 1) / fixMonths), annualRates.length - 1)] / 12;
                 const implied = impliedRemainingTerm(balance, previousRate, contractual);
                 // The 1e-6 guards against float noise pushing ceil() up a whole month
                 const horizon = isFinite(implied)

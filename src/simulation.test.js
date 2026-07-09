@@ -136,6 +136,17 @@ describe('simulate', () => {
         expect(r.totalInterest).toBeCloseTo(natural.totalInterest, 8);
     });
 
+    it('honours a custom fixed-period length', () => {
+        const twoYear = simulate({ ...base, annualRates: pct([5, 3]), paymentAmount: 1500 });
+        const fiveYear = simulate({ ...base, annualRates: pct([5, 3]), paymentAmount: 1500, fixYears: 5 });
+        // The rate drop lands at month 25 for 2-year fixes but only at month 61 for 5-year fixes
+        expect(twoYear.schedule[24].interest).toBeLessThan(twoYear.schedule[23].interest * 0.99);
+        expect(fiveYear.schedule[24].interest).toBeGreaterThan(fiveYear.schedule[23].interest * 0.99);
+        expect(fiveYear.schedule[60].interest).toBeLessThan(fiveYear.schedule[59].interest * 0.9);
+        // Longer at the higher initial rate costs more overall
+        expect(fiveYear.totalInterest).toBeGreaterThan(twoYear.totalInterest);
+    });
+
     it('keeps the payment level across rate changes in reduceTerm mode when rates are flat', () => {
         const r = simulate({ ...base, paymentAmount: 1500 });
         // With a single flat rate, a reduceTerm recalculation should not move
