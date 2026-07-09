@@ -13,6 +13,7 @@ The application is built with modern web technologies, including Vite for a fast
 * **10% Overpayment Cap:** The simulator accurately models a common mortgage feature where annual overpayments are capped at 10% of the remaining principal at the start of the year.
 * **Term vs Payment Reduction:** Choose whether overpayments shorten the mortgage term (the contractual payment level is kept at each rate change) or reduce the contractual payment (the original end date is kept).
 * **Planned Full Repayment:** Model clearing the whole remaining balance at the end of any fixed period — no early repayment charge applies there, so the lump sum is not subject to the 10% cap.
+* **Two Mortgages on One Graph:** Enable "Compare" to overlay a second, fully independent mortgage (own principal, term, payment, mode, and rate schedule) as dashed lines, with a summary of the interest and payoff differences.
 * **Debt Consolidation Comparison:** See what shifting a car loan or credit-card balance under the mortgage umbrella saves versus keeping it standalone. The comparison matches monthly outgoings: the standalone loan's payment is redirected into the mortgage for the months the loan would have run.
 * **Detailed Summary:** Get a quick overview of the key metrics, including the actual payoff time, total interest paid, and total overpayments made.
 * **Multi-Axis Graph:** Visualize your mortgage journey with a detailed graph showing:
