@@ -1,5 +1,6 @@
 import Chart from 'chart.js/auto';
 import './style.css';
+import { simulate } from './simulation.js';
 
 // --- DOM Elements ---
 const principalInput = document.getElementById('principal');
@@ -10,34 +11,15 @@ const addRateBtn = document.getElementById('addRateBtn');
 
 const payoffTimeEl = document.getElementById('payoffTime');
 const totalInterestEl = document.getElementById('totalInterest');
-const initialMinPaymentEl = document.getElementById('initialMinPayment');
+const initialContractualPaymentEl = document.getElementById('initialContractualPayment');
 const totalOverpaymentsEl = document.getElementById('totalOverpayments');
 const errorMessageEl = document.getElementById('error-message');
 const infoMessageEl = document.getElementById('info-message');
 
 let payoffChart = null;
 
-// --- Core Logic ---
+// --- Simulation ---
 
-/**
- * Calculates the standard monthly mortgage payment.
- * @param {number} principal - The loan principal.
- * @param {number} monthlyInterestRate - The monthly interest rate.
- * @param {number} numberOfMonths - The total number of months for the loan.
- * @returns {number} The calculated monthly payment.
- */
-function calculateMinimumPayment(principal, monthlyInterestRate, numberOfMonths) {
-    if (principal <= 0) return 0;
-    if (monthlyInterestRate <= 0) return principal / numberOfMonths;
-    if (numberOfMonths <= 0) return principal;
-    const factor = Math.pow(1 + monthlyInterestRate, numberOfMonths);
-    if (!isFinite(factor)) return principal; // Handle huge numbers
-    return principal * (monthlyInterestRate * factor) / (factor - 1);
-}
-
-/**
- * Main function to run the simulation.
- */
 function runSimulation() {
     errorMessageEl.classList.add('hidden');
     infoMessageEl.classList.add('hidden');
@@ -48,6 +30,7 @@ function runSimulation() {
     const paymentAmount = parseFloat(paymentAmountInput.value) || 0;
     const rateInputs = Array.from(document.querySelectorAll('.rate-input'));
     const interestRates = rateInputs.map(input => parseFloat(input.value) / 100);
+    const overpaymentMode = document.querySelector('input[name="overpaymentMode"]:checked').value;
 
     // --- Validate Inputs ---
     if (isNaN(principal) || principal <= 0) { showError("Invalid principal amount."); return; }
@@ -56,96 +39,35 @@ function runSimulation() {
     if (interestRates.some(isNaN)) { showError("Please fill in all interest rate fields."); return; }
     if (interestRates.length === 0) { showError("Please add at least one interest rate period."); return; }
 
-    // --- Simulation Setup ---
-    let balance = principal;
-    let totalInterestPaid = 0;
-    let totalOverpaymentsMade = 0;
-    let months = 0;
-    const totalMonthsInTerm = termYears * 12;
-    const interestGraphData = [];
-    const paymentGraphData = [];
-    const principalGraphData = [];
+    const result = simulate({ principal, termYears, paymentAmount, annualRates: interestRates, overpaymentMode });
 
-    let annualOverpaymentCap = 0;
-    let overpaymentsThisYear = 0;
-    let capHasBeenHit = false;
-
-    // --- Calculate Benchmark Initial Payment ---
-    const initialMonthlyRate = interestRates[0] / 12;
-    const initialMinPayment = calculateMinimumPayment(principal, initialMonthlyRate, totalMonthsInTerm);
-    principalGraphData.push({ x: 0, y: principal });
-
-    // --- Simulation Loop ---
-    while (balance > 0 && months < totalMonthsInTerm) {
-        // Set annual cap at the start of each year
-        if (months % 12 === 0) {
-            annualOverpaymentCap = balance * 0.10;
-            overpaymentsThisYear = 0;
-        }
-
-        const currentPeriodIndex = Math.floor(months / 24);
-        const annualInterestRate = interestRates[Math.min(currentPeriodIndex, interestRates.length - 1)];
-        const monthlyInterestRate = annualInterestRate / 12;
-
-        const interestForMonth = balance * monthlyInterestRate;
-
-        const remainingMonthsInTerm = totalMonthsInTerm - months;
-        const minimumMonthlyPayment = calculateMinimumPayment(balance, monthlyInterestRate, remainingMonthsInTerm);
-
-        // Determine the overpayment amount and apply the cap
-        let intendedOverpayment = Math.max(0, paymentAmount - minimumMonthlyPayment);
-        let allowedOverpayment = Math.max(0, annualOverpaymentCap - overpaymentsThisYear);
-        let actualOverpayment = Math.min(intendedOverpayment, allowedOverpayment);
-
-        if (intendedOverpayment > actualOverpayment) {
-            capHasBeenHit = true;
-        }
-
-        let finalPaymentThisMonth = minimumMonthlyPayment + actualOverpayment;
-
-        if (finalPaymentThisMonth < interestForMonth && balance > 0) {
-            showError(`Payment of £${finalPaymentThisMonth.toFixed(2)} is not enough to cover interest of £${interestForMonth.toFixed(2)} in month ${months+1}.`);
-            resetResults({initialMinPayment});
-            return;
-        }
-
-        // In the final month, pay only what clears the balance and count only
-        // the overpayment actually needed.
-        const payoffAmount = balance + interestForMonth;
-        if (finalPaymentThisMonth >= payoffAmount) {
-            finalPaymentThisMonth = payoffAmount;
-            actualOverpayment = Math.max(0, finalPaymentThisMonth - minimumMonthlyPayment);
-            balance = 0;
-        } else {
-            balance -= finalPaymentThisMonth - interestForMonth;
-        }
-        totalInterestPaid += interestForMonth;
-        overpaymentsThisYear += actualOverpayment;
-        totalOverpaymentsMade += actualOverpayment;
-        months++;
-
-        // Add data for graphs after month has passed
-        const yearX = months / 12;
-        interestGraphData.push({ x: yearX, y: interestForMonth });
-        paymentGraphData.push({ x: yearX, y: finalPaymentThisMonth });
-        principalGraphData.push({ x: yearX, y: Math.max(0, balance) });
+    const infos = [];
+    if (result.paymentBelowContractual) {
+        infos.push("Your payment is below the contractual monthly payment in one or more months; the contractual payment was paid instead.");
     }
-
-    if (capHasBeenHit) {
-        showInfo("Your 10% annual overpayment cap was reached in one or more years. Payments were automatically reduced to stay within the limit.");
+    if (result.capHit) {
+        infos.push("Your 10% annual overpayment cap was reached in one or more years. Payments were automatically reduced to stay within the limit.");
     }
+    if (infos.length > 0) showInfo(infos.join(' '));
 
-    updateUI(months, totalInterestPaid, initialMinPayment, totalOverpaymentsMade, interestGraphData, paymentGraphData, principalGraphData);
+    const interestGraphData = result.schedule.map(row => ({ x: row.month / 12, y: row.interest }));
+    const paymentGraphData = result.schedule.map(row => ({ x: row.month / 12, y: row.payment }));
+    const principalGraphData = [
+        { x: 0, y: principal },
+        ...result.schedule.map(row => ({ x: row.month / 12, y: Math.max(0, row.balance) })),
+    ];
+
+    updateUI(result.months, result.totalInterest, result.initialContractualPayment, result.totalOverpayments, interestGraphData, paymentGraphData, principalGraphData);
 }
 
 // --- UI Update Functions ---
 
-function updateUI(months, totalInterest, initialMinPayment, totalOverpayments, interestData, paymentData, principalData) {
+function updateUI(months, totalInterest, initialContractualPayment, totalOverpayments, interestData, paymentData, principalData) {
     const years = Math.floor(months / 12);
     const remainingMonths = months % 12;
     payoffTimeEl.textContent = `${years} years, ${remainingMonths} months`;
     totalInterestEl.textContent = totalInterest.toLocaleString('en-GB', { style: 'currency', currency: 'GBP' });
-    initialMinPaymentEl.textContent = initialMinPayment.toLocaleString('en-GB', { style: 'currency', currency: 'GBP' });
+    initialContractualPaymentEl.textContent = initialContractualPayment.toLocaleString('en-GB', { style: 'currency', currency: 'GBP' });
     totalOverpaymentsEl.textContent = totalOverpayments.toLocaleString('en-GB', { style: 'currency', currency: 'GBP' });
 
     payoffChart.data.labels = principalData.map(p => p.x);
@@ -163,20 +85,6 @@ function showError(message) {
 function showInfo(message) {
     infoMessageEl.textContent = message;
     infoMessageEl.classList.remove('hidden');
-}
-
-function resetResults(defaults = {}) {
-    payoffTimeEl.textContent = '-';
-    totalInterestEl.textContent = '-';
-    initialMinPaymentEl.textContent = defaults.initialMinPayment ? defaults.initialMinPayment.toLocaleString('en-GB', { style: 'currency', currency: 'GBP' }) : '-';
-    totalOverpaymentsEl.textContent = '-';
-    if(payoffChart) {
-        payoffChart.data.labels = [];
-        payoffChart.data.datasets[0].data = [];
-        payoffChart.data.datasets[1].data = [];
-        payoffChart.data.datasets[2].data = [];
-        payoffChart.update();
-    }
 }
 
 // --- Dynamic Rate Period Management ---
@@ -307,4 +215,7 @@ document.addEventListener('DOMContentLoaded', () => {
 addRateBtn.addEventListener('click', () => addRatePeriod());
 [principalInput, termInput, paymentAmountInput].forEach(input => {
     input.addEventListener('input', runSimulation);
+});
+document.querySelectorAll('input[name="overpaymentMode"]').forEach(radio => {
+    radio.addEventListener('change', runSimulation);
 });

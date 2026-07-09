@@ -9,6 +9,7 @@ The application is built with modern web technologies, including Vite for a fast
 * **Dynamic Interest Rates:** Define a schedule of interest rates for successive 2-year fixed periods.
 * **Fixed Monthly Payments:** Set a consistent monthly payment amount and see how it impacts the loan payoff time.
 * **10% Overpayment Cap:** The simulator accurately models a common mortgage feature where annual overpayments are capped at 10% of the remaining principal at the start of the year.
+* **Term vs Payment Reduction:** Choose whether overpayments shorten the mortgage term (the contractual payment level is kept at each rate change) or reduce the contractual payment (the original end date is kept).
 * **Detailed Summary:** Get a quick overview of the key metrics, including the actual payoff time, total interest paid, and total overpayments made.
 * **Multi-Axis Graph:** Visualize your mortgage journey with a detailed graph showing:
     * Monthly Interest Paid (Left Axis)
@@ -54,6 +55,12 @@ To generate the final, portable index.html file, run the build command:
 `npm run build`
 
 This will create a dist folder. Inside this folder, you will find the index.html file. This file is completely self-contained with all CSS and JavaScript inlined, and you can open it directly in any web browser without needing a server.
+
+### **Running the Tests**
+
+The simulation logic is covered by a Vitest suite:
+
+`npm test`
 
 ### **Previewing the Production Build**
 
