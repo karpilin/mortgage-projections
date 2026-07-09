@@ -125,7 +125,44 @@ function runSimulation() {
 
 // --- UI Update Functions ---
 
+function totalOutlay(result) {
+    const payments = result.schedule.reduce((sum, row) => sum + row.payment, 0);
+    return payments + (result.fullRepayment ? result.fullRepayment.amount : 0);
+}
+
+// Used when both modes run to a planned exit: compare what actually matters
+// by that date — interest, total cash out, and the minimum obligation held.
+function renderExitComparison(activeMode, reducePayment, reduceTerm) {
+    const active = activeMode === 'reducePayment' ? reducePayment : reduceTerm;
+    const other = activeMode === 'reducePayment' ? reduceTerm : reducePayment;
+    const activeName = activeMode === 'reducePayment' ? 'reducing the payment' : 'reducing the term';
+    const otherName = activeMode === 'reducePayment' ? 'reducing the term' : 'reducing the payment';
+
+    const exitYear = active.fullRepayment.month / 12;
+    const interestDiff = active.totalInterest - other.totalInterest;
+    const outlayDiff = totalOutlay(active) - totalOutlay(other);
+    const minActive = active.schedule[active.months - 1].contractual;
+    const minOther = other.schedule[other.months - 1].contractual;
+
+    const interestPhrase = Math.abs(interestDiff) < 1
+        ? 'costs virtually the same interest as'
+        : `costs ${gbpWhole(Math.abs(interestDiff))} ${interestDiff >= 0 ? 'more' : 'less'} interest than`;
+    const outlayPhrase = Math.abs(outlayDiff) < 1
+        ? 'an identical total outlay'
+        : `a total outlay ${gbpWhole(Math.abs(outlayDiff))} ${outlayDiff >= 0 ? 'higher' : 'lower'}`;
+    const minimumPhrase = minActive <= minOther
+        ? 'the lower floor you keep if income or rates change before the exit'
+        : 'note the other mode would hold the lower minimum here';
+
+    modeComparisonEl.textContent = `Up to the planned exit at the end of year ${exitYear}, ${activeName} ${interestPhrase} ${otherName}, with ${outlayPhrase} (final repayment ${gbpWhole(active.fullRepayment.amount)} vs ${gbpWhole(other.fullRepayment.amount)}). The contractual minimum just before exit is ${gbpWhole(minActive)}/month against ${gbpWhole(minOther)} — ${minimumPhrase}.`;
+}
+
 function updateModeComparison(activeMode, reducePayment, reduceTerm, fixMonths) {
+    if (reducePayment.fullRepayment && reduceTerm.fullRepayment) {
+        renderExitComparison(activeMode, reducePayment, reduceTerm);
+        modeComparisonEl.classList.remove('hidden');
+        return;
+    }
     const extraInterest = reducePayment.totalInterest - reduceTerm.totalInterest;
     const gap = gbpWhole(Math.abs(extraInterest));
     const similarCost = Math.abs(extraInterest) < 1;
