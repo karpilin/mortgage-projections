@@ -13,7 +13,7 @@ There is no linter.
 
 ## What this is
 
-A UK mortgage overpayment simulator: a single-page vanilla JS app with no framework. All markup lives in `index.html`; the simulation is a pure module in `src/simulation.js` (unit-tested in `src/simulation.test.js`); `src/main.js` handles DOM, validation, and the Chart.js multi-axis graph.
+A UK mortgage overpayment simulator: a single-page vanilla JS app with no framework. Its purpose is to highlight the benefits of *payment reduction* over *term reduction* when overpaying — a falling contractual minimum gives flexibility against income/rate changes for slightly more interest — so `reducePayment` is the default mode and the UI compares the two modes head-on. Don't reframe the tool around fastest payoff. All markup lives in `index.html`; the simulation is a pure module in `src/simulation.js` (unit-tested in `src/simulation.test.js`); `src/main.js` handles DOM, validation, and the Chart.js multi-axis graph.
 
 ## Architecture notes
 

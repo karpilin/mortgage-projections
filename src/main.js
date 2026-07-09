@@ -15,8 +15,18 @@ const initialContractualPaymentEl = document.getElementById('initialContractualP
 const totalOverpaymentsEl = document.getElementById('totalOverpayments');
 const errorMessageEl = document.getElementById('error-message');
 const infoMessageEl = document.getElementById('info-message');
+const modeComparisonEl = document.getElementById('mode-comparison');
 
 let payoffChart = null;
+
+const gbp = value => value.toLocaleString('en-GB', { style: 'currency', currency: 'GBP' });
+const gbpWhole = value => value.toLocaleString('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 });
+const formatPayoff = months => `${Math.floor(months / 12)} years, ${months % 12} months`;
+
+// Contractual payment in force during the loan's final fixed period
+function finalPeriodContractual(result) {
+    return result.schedule[Math.floor((result.months - 1) / 24) * 24].contractual;
+}
 
 // --- Simulation ---
 
@@ -39,7 +49,12 @@ function runSimulation() {
     if (interestRates.some(isNaN)) { showError("Please fill in all interest rate fields."); return; }
     if (interestRates.length === 0) { showError("Please add at least one interest rate period."); return; }
 
-    const result = simulate({ principal, termYears, paymentAmount, annualRates: interestRates, overpaymentMode });
+    const inputs = { principal, termYears, paymentAmount, annualRates: interestRates };
+    const reducePayment = simulate({ ...inputs, overpaymentMode: 'reducePayment' });
+    const reduceTerm = simulate({ ...inputs, overpaymentMode: 'reduceTerm' });
+    const result = overpaymentMode === 'reducePayment' ? reducePayment : reduceTerm;
+
+    updateModeComparison(overpaymentMode, reducePayment, reduceTerm);
 
     const infos = [];
     if (result.paymentBelowContractual) {
@@ -52,28 +67,49 @@ function runSimulation() {
 
     const interestGraphData = result.schedule.map(row => ({ x: row.month / 12, y: row.interest }));
     const paymentGraphData = result.schedule.map(row => ({ x: row.month / 12, y: row.payment }));
+    const contractualGraphData = result.schedule.map(row => ({ x: row.month / 12, y: row.contractual }));
     const principalGraphData = [
         { x: 0, y: principal },
         ...result.schedule.map(row => ({ x: row.month / 12, y: Math.max(0, row.balance) })),
     ];
 
-    updateUI(result.months, result.totalInterest, result.initialContractualPayment, result.totalOverpayments, interestGraphData, paymentGraphData, principalGraphData);
+    updateUI(result, interestGraphData, paymentGraphData, principalGraphData, contractualGraphData);
 }
 
 // --- UI Update Functions ---
 
-function updateUI(months, totalInterest, initialContractualPayment, totalOverpayments, interestData, paymentData, principalData) {
-    const years = Math.floor(months / 12);
-    const remainingMonths = months % 12;
-    payoffTimeEl.textContent = `${years} years, ${remainingMonths} months`;
-    totalInterestEl.textContent = totalInterest.toLocaleString('en-GB', { style: 'currency', currency: 'GBP' });
-    initialContractualPaymentEl.textContent = initialContractualPayment.toLocaleString('en-GB', { style: 'currency', currency: 'GBP' });
-    totalOverpaymentsEl.textContent = totalOverpayments.toLocaleString('en-GB', { style: 'currency', currency: 'GBP' });
+function updateModeComparison(activeMode, reducePayment, reduceTerm) {
+    const extraInterest = reducePayment.totalInterest - reduceTerm.totalInterest;
+    const gap = gbpWhole(Math.abs(extraInterest));
+    const similarCost = Math.abs(extraInterest) < 1;
+    const lowMinimum = gbpWhole(finalPeriodContractual(reducePayment));
+    const highMinimum = gbpWhole(finalPeriodContractual(reduceTerm));
+
+    if (activeMode === 'reducePayment') {
+        const cost = similarCost
+            ? 'costs about the same in interest as'
+            : `costs ${gap} ${extraInterest >= 0 ? 'more' : 'less'} in interest than`;
+        modeComparisonEl.textContent = `Reducing the payment ${cost} reducing the term (which would pay off in ${formatPayoff(reduceTerm.months)}), but the contractual minimum falls to ${lowMinimum}/month by the final fixed period instead of staying around ${highMinimum} — the same overpayment freedom, with a far smaller obligation if income or rates change.`;
+    } else {
+        const saving = similarCost
+            ? 'about the same total interest'
+            : extraInterest >= 0 ? `${gap} less interest` : `${gap} more interest`;
+        modeComparisonEl.textContent = `Reducing the term pays off in ${formatPayoff(reduceTerm.months)} with ${saving} than reducing the payment, but the contractual minimum stays around ${highMinimum}/month for the life of the loan; reducing the payment would let it fall to ${lowMinimum}/month with the same overpayment freedom.`;
+    }
+    modeComparisonEl.classList.remove('hidden');
+}
+
+function updateUI(result, interestData, paymentData, principalData, contractualData) {
+    payoffTimeEl.textContent = formatPayoff(result.months);
+    totalInterestEl.textContent = gbp(result.totalInterest);
+    initialContractualPaymentEl.textContent = gbp(result.initialContractualPayment);
+    totalOverpaymentsEl.textContent = gbp(result.totalOverpayments);
 
     payoffChart.data.labels = principalData.map(p => p.x);
     payoffChart.data.datasets[0].data = interestData;
     payoffChart.data.datasets[1].data = paymentData;
     payoffChart.data.datasets[2].data = principalData;
+    payoffChart.data.datasets[3].data = contractualData;
     payoffChart.update();
 }
 
@@ -144,6 +180,17 @@ function createChart() {
                     pointRadius: 0,
                     tension: 0.1,
                     yAxisID: 'y1'
+                },
+                {
+                    label: 'Contractual Minimum',
+                    data: [],
+                    borderColor: 'rgba(100, 116, 139, 1)', // slate-500
+                    borderDash: [6, 4],
+                    borderWidth: 2,
+                    fill: false,
+                    pointRadius: 0,
+                    tension: 0.1,
+                    yAxisID: 'y'
                 }]
         },
         options: {
