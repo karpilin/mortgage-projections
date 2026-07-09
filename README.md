@@ -2,6 +2,8 @@
 
 This is a web-based mortgage simulator designed to provide detailed projections for a UK-style mortgage. It allows users to see the long-term effects of fixed monthly payments and annual overpayment caps against a schedule of changing interest rates.
 
+Its specific aim is to highlight the benefits of **reducing the contractual payment** rather than the term when overpaying: total interest is slightly higher, but the minimum obligation falls over time — giving flexibility if income or interest rates change — while the freedom to overpay (and to repay in full at the end of any fixed period) is unchanged. That flexibility makes it practical to shift household borrowing such as car loans or credit cards under the mortgage umbrella at the lowest overall interest rate.
+
 The application is built with modern web technologies, including Vite for a fast development environment, and is bundled into a single, portable HTML file for easy distribution and offline use.
 
 ## **Features**

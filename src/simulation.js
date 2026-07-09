@@ -46,14 +46,14 @@ export function impliedRemainingTerm(balance, monthlyRate, payment) {
  *   month (never less than the contractual payment).
  * @param {number[]} inputs.annualRates - Decimal rates (0.0464 = 4.64%), one
  *   per 2-year fix; the last one carries forward.
- * @param {'reduceTerm'|'reducePayment'} [inputs.overpaymentMode]
+ * @param {'reducePayment'|'reduceTerm'} [inputs.overpaymentMode]
  * @returns {{months: number, totalInterest: number, totalOverpayments: number,
  *   initialContractualPayment: number, capHit: boolean,
  *   paymentBelowContractual: boolean,
  *   schedule: Array<{month: number, interest: number, payment: number,
  *   contractual: number, balance: number}>}}
  */
-export function simulate({ principal, termYears, paymentAmount, annualRates, overpaymentMode = 'reduceTerm' }) {
+export function simulate({ principal, termYears, paymentAmount, annualRates, overpaymentMode = 'reducePayment' }) {
     const totalMonths = termYears * 12;
 
     let balance = principal;

@@ -49,17 +49,17 @@
                     <p class="mt-1 text-sm text-gray-500">How the lender recalculates the contractual payment at each rate change.</p>
                     <div class="mt-4 space-y-3">
                         <label class="flex items-start gap-3 cursor-pointer">
-                            <input type="radio" name="overpaymentMode" value="reduceTerm" checked class="mt-1 text-indigo-600 focus:ring-indigo-500">
+                            <input type="radio" name="overpaymentMode" value="reducePayment" checked class="mt-1 text-indigo-600 focus:ring-indigo-500">
                             <span class="text-sm">
-                                <span class="font-medium text-gray-900">Reduce the term</span><br>
-                                <span class="text-gray-500">Payment level is kept; overpayments shorten the mortgage.</span>
+                                <span class="font-medium text-gray-900">Reduce the payment</span><br>
+                                <span class="text-gray-500">The contractual minimum falls over time — flexibility if income or rates change, and the loan can still be cleared at the end of any fixed period.</span>
                             </span>
                         </label>
                         <label class="flex items-start gap-3 cursor-pointer">
-                            <input type="radio" name="overpaymentMode" value="reducePayment" class="mt-1 text-indigo-600 focus:ring-indigo-500">
+                            <input type="radio" name="overpaymentMode" value="reduceTerm" class="mt-1 text-indigo-600 focus:ring-indigo-500">
                             <span class="text-sm">
-                                <span class="font-medium text-gray-900">Reduce the payment</span><br>
-                                <span class="text-gray-500">Original end date is kept; the contractual payment drops.</span>
+                                <span class="font-medium text-gray-900">Reduce the term</span><br>
+                                <span class="text-gray-500">Pays off sooner, but the contractual minimum stays high for the whole life of the loan.</span>
                             </span>
                         </label>
                     </div>
@@ -96,6 +96,7 @@
                         <p id="totalOverpayments" class="text-2xl font-semibold text-indigo-600">-</p>
                     </div>
                 </div>
+                <div id="mode-comparison" class="hidden text-sm text-gray-700 bg-indigo-50 rounded-lg p-4"></div>
                 <div class="w-full h-80 sm:h-96 bg-white rounded-lg p-2">
                     <canvas id="payoffChart"></canvas>
                 </div>
