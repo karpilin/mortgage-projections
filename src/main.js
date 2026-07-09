@@ -1,6 +1,6 @@
 import Chart from 'chart.js/auto';
 import './style.css';
-import { simulate } from './simulation.js';
+import { simulate, standaloneLoanCost } from './simulation.js';
 
 // --- DOM Elements ---
 const principalInput = document.getElementById('principal');
@@ -8,6 +8,10 @@ const termInput = document.getElementById('term');
 const paymentAmountInput = document.getElementById('paymentAmount');
 const fixYearsInput = document.getElementById('fixYears');
 const fullRepaymentSelect = document.getElementById('fullRepayment');
+const consolidationAmountInput = document.getElementById('consolidationAmount');
+const consolidationRateInput = document.getElementById('consolidationRate');
+const consolidationTermInput = document.getElementById('consolidationTerm');
+const consolidationPanelEl = document.getElementById('consolidation-panel');
 const interestRatePeriodsDiv = document.getElementById('interestRatePeriods');
 const addRateBtn = document.getElementById('addRateBtn');
 
@@ -88,6 +92,7 @@ function runSimulation() {
     const result = overpaymentMode === 'reducePayment' ? reducePayment : reduceTerm;
 
     updateModeComparison(overpaymentMode, reducePayment, reduceTerm, fixYears * 12);
+    updateConsolidationPanel(inputs, overpaymentMode, result);
 
     const infos = [];
     if (result.fullRepayment) {
@@ -139,6 +144,47 @@ function updateModeComparison(activeMode, reducePayment, reduceTerm, fixMonths) 
         modeComparisonEl.textContent = `Reducing the term pays off in ${formatPayoff(reduceTerm.months)} with ${saving} than reducing the payment, but the contractual minimum stays around ${highMinimum}/month for the life of the loan; reducing the payment would let it fall to ${lowMinimum}/month with the same overpayment freedom.`;
     }
     modeComparisonEl.classList.remove('hidden');
+}
+
+// Fair comparison: consolidating adds the debt to the principal AND frees the
+// standalone loan's monthly payment, which goes into the mortgage payment.
+function updateConsolidationPanel(inputs, overpaymentMode, baseline) {
+    const amount = parseFloat(consolidationAmountInput.value);
+    if (isNaN(amount) || amount <= 0) {
+        consolidationPanelEl.classList.add('hidden');
+        return;
+    }
+    const apr = parseFloat(consolidationRateInput.value);
+    const loanTermYears = parseInt(consolidationTermInput.value);
+    if (isNaN(apr) || apr < 0 || isNaN(loanTermYears) || loanTermYears < 1) {
+        consolidationPanelEl.textContent = "Enter a valid standalone APR and term to compare consolidation.";
+        consolidationPanelEl.classList.remove('hidden');
+        return;
+    }
+
+    const standalone = standaloneLoanCost(amount, apr / 100, loanTermYears);
+    // Matched cash flows: the standalone loan's payment goes into the
+    // mortgage instead, but only for the months the loan would have run.
+    const consolidated = simulate({
+        ...inputs,
+        overpaymentMode,
+        principal: inputs.principal + amount,
+        extraPayment: { monthlyAmount: standalone.monthlyPayment, months: loanTermYears * 12 },
+    });
+    const extraInterest = consolidated.totalInterest - baseline.totalInterest;
+    const saving = standalone.totalInterest - extraInterest;
+
+    const mortgageCost = extraInterest >= 0
+        ? `adds ${gbpWhole(extraInterest)} of mortgage interest`
+        : `even reduces total mortgage interest by ${gbpWhole(-extraInterest)}`;
+    const verdict = saving >= 0
+        ? `consolidation saves ${gbpWhole(saving)}`
+        : `the standalone loan is ${gbpWhole(-saving)} cheaper here`;
+    const payoffNote = consolidated.months !== baseline.months
+        ? ` Mortgage payoff becomes ${formatPayoff(consolidated.months)}.`
+        : '';
+    consolidationPanelEl.textContent = `Consolidating ${gbpWhole(amount)} under the mortgage — paying the same ${gbp(standalone.monthlyPayment)}/month into it for those ${loanTermYears} ${loanTermYears === 1 ? 'year' : 'years'} — ${mortgageCost}. As a standalone loan at ${apr}% it would cost ${gbpWhole(standalone.totalInterest)} in interest, so ${verdict}.${payoffNote}`;
+    consolidationPanelEl.classList.remove('hidden');
 }
 
 function updateUI(result, interestData, paymentData, principalData, contractualData) {
@@ -280,6 +326,17 @@ function createChart() {
                     intersect: false,
                     filter: item => item.parsed.y !== null,
                     callbacks: {
+                        title: function(items) {
+                            if (!items.length) return '';
+                            const months = Math.round(items[0].parsed.x * 12);
+                            if (months === 0) return 'Start';
+                            const years = Math.floor(months / 12);
+                            const rest = months % 12;
+                            const parts = [];
+                            if (years > 0) parts.push(`${years} ${years === 1 ? 'year' : 'years'}`);
+                            if (rest > 0) parts.push(`${rest} ${rest === 1 ? 'month' : 'months'}`);
+                            return parts.join(', ');
+                        },
                         label: function(context) {
                             let label = context.dataset.label || '';
                             if (label) {
@@ -318,4 +375,7 @@ fullRepaymentSelect.addEventListener('change', runSimulation);
 fixYearsInput.addEventListener('input', () => {
     relabelRatePeriods();
     runSimulation();
+});
+[consolidationAmountInput, consolidationRateInput, consolidationTermInput].forEach(input => {
+    input.addEventListener('input', runSimulation);
 });
