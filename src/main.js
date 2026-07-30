@@ -20,9 +20,14 @@ let payoffChart = null;
 let mortgageA = null;
 let mortgageB = null;
 
-const gbp = value => value.toLocaleString('en-GB', { style: 'currency', currency: 'GBP' });
+// All money is rounded to the nearest penny before display or comparison,
+// so no fractional pennies ever surface (and A − B always matches the shown values).
+const roundPenny = value => Math.round(value * 100) / 100;
+const gbp = value => roundPenny(value).toLocaleString('en-GB', { style: 'currency', currency: 'GBP' });
 const gbpWhole = value => value.toLocaleString('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 });
 const formatPayoff = months => `${Math.floor(months / 12)} years, ${months % 12} months`;
+// Years with at most one decimal and no trailing zeroes: "2.5", "4"
+const formatYears = months => String(Math.round(months / 12 * 10) / 10);
 
 function formatDuration(months) {
     const years = Math.floor(months / 12);
@@ -66,8 +71,12 @@ function mortgageFormHTML(prefix) {
                     <label for="${prefix}-payment" class="block text-sm font-medium text-gray-700 mb-1">Payment Amount</label>
                     <div class="relative">
                         <span class="absolute left-0 top-0 h-full pl-4 flex items-center text-gray-400">£</span>
-                        <input type="number" id="${prefix}-payment" value="4000" class="payment-input w-full pl-10 px-4 py-2 ${input}">
+                        <input type="number" id="${prefix}-payment" value="4000" class="payment-input w-full pl-10 px-4 py-2 disabled:bg-gray-100 disabled:text-gray-400 ${input}">
                     </div>
+                    <label class="mt-2 flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                        <input type="checkbox" class="contractual-only rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                        Only pay the contractual minimum
+                    </label>
                 </div>
                 <div>
                     <label for="${prefix}-full-repayment" class="block text-sm font-medium text-gray-700 mb-1">Repay in Full at End of Fix</label>
@@ -119,6 +128,7 @@ function createMortgagePanel(formEl, prefix) {
     const principalInput = formEl.querySelector('.principal-input');
     const termInput = formEl.querySelector('.term-input');
     const paymentInput = formEl.querySelector('.payment-input');
+    const contractualOnlyCheckbox = formEl.querySelector('.contractual-only');
     const repaySelect = formEl.querySelector('.full-repayment');
     const periodsDiv = formEl.querySelector('.rate-periods');
     const addBtn = formEl.querySelector('.add-rate');
@@ -218,22 +228,30 @@ function createMortgagePanel(formEl, prefix) {
     function read() {
         const principal = parseFloat(principalInput.value);
         const termYears = parseInt(termInput.value);
-        const paymentAmount = parseFloat(paymentInput.value) || 0;
+        // An explicit 0 payment means the same as the checkbox: pay only the
+        // contractual minimum (simulate() raises every payment up to it).
+        const paymentEntered = paymentInput.value.trim() === '' ? NaN : parseFloat(paymentInput.value);
+        const contractualOnly = contractualOnlyCheckbox.checked || paymentEntered === 0;
+        const paymentAmount = contractualOnly ? 0 : paymentEntered;
         const ratePeriods = readRatePeriods();
         const overpaymentMode = formEl.querySelector(`input[name="${prefix}-overpaymentMode"]:checked`).value;
 
         if (isNaN(principal) || principal <= 0) return { error: "Invalid principal amount." };
         if (isNaN(termYears) || termYears <= 0) return { error: "Invalid term." };
-        if (isNaN(paymentAmount) || paymentAmount <= 0) return { error: "Invalid payment amount." };
+        if (!contractualOnly && (isNaN(paymentAmount) || paymentAmount < 0)) return { error: "Invalid payment amount." };
         if (periodsDiv.children.length === 0) return { error: "Please add at least one interest rate period." };
         if (ratePeriods === null) return { error: "Please fill in every rate period: length in months, rate, and fee (0 for none)." };
 
         syncFullRepaymentOptions(ratePeriods, termYears * 12);
         const fullRepaymentMonth = repaySelect.value === '' ? null : parseInt(repaySelect.value);
-        return { inputs: { principal, termYears, paymentAmount, ratePeriods, fullRepaymentMonth }, overpaymentMode };
+        return { inputs: { principal, termYears, paymentAmount, ratePeriods, fullRepaymentMonth }, overpaymentMode, contractualOnly };
     }
 
     [principalInput, termInput, paymentInput].forEach(input => input.addEventListener('input', runSimulation));
+    contractualOnlyCheckbox.addEventListener('change', () => {
+        paymentInput.disabled = contractualOnlyCheckbox.checked;
+        runSimulation();
+    });
     formEl.querySelectorAll(`input[name="${prefix}-overpaymentMode"]`).forEach(radio => {
         radio.addEventListener('change', runSimulation);
     });
@@ -292,9 +310,9 @@ function runSimulation() {
         infos.push(`Product fees totalling ${gbp(result.totalFees)} were added to the loan at the start of the fixed periods.`);
     }
     if (result.fullRepayment) {
-        infos.push(`The remaining balance of ${gbp(result.fullRepayment.amount)} is repaid in full at the end of year ${result.fullRepayment.month / 12} — the end of a fixed period, so no early repayment charge applies.`);
+        infos.push(`The remaining balance of ${gbp(result.fullRepayment.amount)} is repaid in full at the end of year ${formatYears(result.fullRepayment.month)} — the end of a fixed period, so no early repayment charge applies.`);
     }
-    if (result.paymentBelowContractual) {
+    if (result.paymentBelowContractual && !a.contractualOnly) {
         infos.push("Your payment is below the contractual monthly payment in one or more months; the contractual payment was paid instead.");
     }
     if (result.capHit) {
@@ -335,7 +353,7 @@ function renderExitComparison(activeMode, reducePayment, reduceTerm) {
     const activeName = activeMode === 'reducePayment' ? 'reducing the payment' : 'reducing the term';
     const otherName = activeMode === 'reducePayment' ? 'reducing the term' : 'reducing the payment';
 
-    const exitYear = active.fullRepayment.month / 12;
+    const exitYear = formatYears(active.fullRepayment.month);
     const interestDiff = active.totalInterest - other.totalInterest;
     const outlayDiff = totalOutlay(active) - totalOutlay(other);
     const minActive = active.schedule[active.months - 1].contractual;
@@ -476,6 +494,58 @@ function showInfo(message) {
     infoMessageEl.classList.remove('hidden');
 }
 
+// --- Chart Tooltip ---
+// Rendered as an HTML overlay instead of Chart.js's canvas tooltip so the
+// A-vs-B difference can carry its own colour and direction icon.
+
+function tooltipDiffHTML(diff) {
+    if (Math.abs(diff) < 0.005) return '<span class="text-gray-400">(£0.00)</span>';
+    return diff > 0
+        ? `<span class="text-green-400">(▲ ${gbp(diff)})</span>`
+        : `<span class="text-red-400">(▼ ${gbp(-diff)})</span>`;
+}
+
+function getTooltipEl(chart) {
+    let el = chart.canvas.parentNode.querySelector('.chart-tooltip');
+    if (!el) {
+        el = document.createElement('div');
+        el.className = 'chart-tooltip absolute top-0 left-0 pointer-events-none opacity-0 transition-opacity duration-100 bg-gray-900/85 text-white text-xs rounded-md px-3 py-2 whitespace-nowrap z-10 space-y-0.5';
+        chart.canvas.parentNode.appendChild(el);
+    }
+    return el;
+}
+
+function externalTooltip(context) {
+    const { chart, tooltip } = context;
+    const el = getTooltipEl(chart);
+    if (tooltip.opacity === 0 || !tooltip.dataPoints?.length) {
+        el.style.opacity = 0;
+        return;
+    }
+
+    const months = Math.round(tooltip.dataPoints[0].parsed.x * 12);
+    const rows = tooltip.dataPoints.map(item => {
+        const bDataset = item.datasetIndex < 4 ? chart.data.datasets[item.datasetIndex + 4] : null;
+        const bPoint = bDataset && bDataset.data[item.dataIndex];
+        const text = bPoint && bPoint.y !== null
+            ? `${item.dataset.label} A (B): <span class="font-bold">${gbp(item.parsed.y)}</span> / ${gbp(bPoint.y)} ${tooltipDiffHTML(roundPenny(bPoint.y) - roundPenny(item.parsed.y))}`
+            : `${item.dataset.label}: ${gbp(item.parsed.y)}`;
+        return `<div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-sm shrink-0" style="background:${item.dataset.borderColor}"></span>
+            <span>${text}</span>
+        </div>`;
+    });
+    el.innerHTML = `<div class="font-semibold mb-1">${months === 0 ? 'Start' : formatDuration(months)}</div>${rows.join('')}`;
+
+    // Place beside the caret, flipping sides rather than overflowing the chart
+    let left = tooltip.caretX + 12;
+    if (left + el.offsetWidth > chart.width) left = tooltip.caretX - el.offsetWidth - 12;
+    const top = Math.min(Math.max(tooltip.caretY - el.offsetHeight / 2, 0), chart.height - el.offsetHeight);
+    el.style.left = chart.canvas.offsetLeft + Math.max(0, left) + 'px';
+    el.style.top = chart.canvas.offsetTop + top + 'px';
+    el.style.opacity = 1;
+}
+
 // --- Chart Initialization ---
 function createChart() {
     const ctx = document.getElementById('payoffChart').getContext('2d');
@@ -576,7 +646,7 @@ function createChart() {
                 y: { // Left axis for monthly amounts
                     beginAtZero: true,
                     position: 'left',
-                    ticks: { callback: value => '£' + value.toLocaleString('en-GB') },
+                    ticks: { callback: value => '£' + roundPenny(value).toLocaleString('en-GB', { maximumFractionDigits: 2 }) },
                     title: { display: true, text: 'Monthly Amount' }
                 },
                 y1: { // Right axis for principal balance
@@ -591,6 +661,7 @@ function createChart() {
                 x: {
                     type: 'linear',
                     min: 0,
+                    ticks: { callback: value => String(Math.round(value * 10) / 10) },
                     title: { display: true, text: 'Years' }
                 }
             },
@@ -602,25 +673,21 @@ function createChart() {
                     }
                 },
                 tooltip: {
+                    enabled: false,
+                    external: externalTooltip,
                     mode: 'index',
                     intersect: false,
-                    filter: item => item.parsed.y !== null,
-                    callbacks: {
-                        title: function(items) {
-                            if (!items.length) return '';
-                            const months = Math.round(items[0].parsed.x * 12);
-                            return months === 0 ? 'Start' : formatDuration(months);
-                        },
-                        label: function(context) {
-                            let label = context.dataset.label || '';
-                            if (label) {
-                                label += ': ';
-                            }
-                            if (context.parsed.y !== null) {
-                                label += new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(context.parsed.y);
-                            }
-                            return label;
+                    // Datasets 0-3 are Mortgage A, 4-7 the same series for B,
+                    // index-aligned by month. Fold each B value into its A
+                    // line ("… A (B): £a / £b (diff)") instead of listing 8
+                    // rows; B rows only stand alone where A has already paid off.
+                    filter: (item, index, items, data) => {
+                        if (item.parsed.y === null) return false;
+                        if (item.datasetIndex >= 4) {
+                            const aPoint = data.datasets[item.datasetIndex - 4].data[item.dataIndex];
+                            if (aPoint && aPoint.y !== null) return false;
                         }
+                        return true;
                     }
                 }
             }
